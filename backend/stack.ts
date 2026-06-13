@@ -72,8 +72,8 @@ export class Stack {
         let obj = this.toSimpleJSON(endpoint);
         return {
             ...obj,
-            composeYAML: this.composeYAML,
-            composeENV: this.composeENV,
+            composeYAML: await this.readComposeYAML(),
+            composeENV: await this.readComposeENV(),
             primaryHostname,
         };
     }
@@ -111,16 +111,16 @@ export class Stack {
         return this._status;
     }
 
-    validate() {
+    async validate() {
         // Check name, allows [a-z][0-9] _ - only
         if (!this.name.match(/^[a-z0-9_-]+$/)) {
             throw new ValidationError("Stack name can only contain [a-z][0-9] _ - only");
         }
 
         // Check YAML format
-        yaml.parse(this.composeYAML);
+        yaml.parse(await this.readComposeYAML());
 
-        let lines = this.composeENV.split("\n");
+        let lines = (await this.readComposeENV()).split("\n");
 
         // Check if the .env is able to pass docker-compose
         // Prevent "setenv: The parameter is incorrect"
@@ -130,10 +130,10 @@ export class Stack {
         }
     }
 
-    get composeYAML() : string {
+    async readComposeYAML() : Promise<string> {
         if (this._composeYAML === undefined) {
             try {
-                this._composeYAML = fs.readFileSync(path.join(this.path, this._composeFileName), "utf-8");
+                this._composeYAML = await fsAsync.readFile(path.join(this.path, this._composeFileName), "utf-8");
             } catch (e) {
                 this._composeYAML = "";
             }
@@ -141,10 +141,10 @@ export class Stack {
         return this._composeYAML;
     }
 
-    get composeENV() : string {
+    async readComposeENV() : Promise<string> {
         if (this._composeENV === undefined) {
             try {
-                this._composeENV = fs.readFileSync(path.join(this.path, ".env"), "utf-8");
+                this._composeENV = await fsAsync.readFile(path.join(this.path, ".env"), "utf-8");
             } catch (e) {
                 this._composeENV = "";
             }
@@ -176,7 +176,7 @@ export class Stack {
      * @param isAdd
      */
     async save(isAdd : boolean) {
-        this.validate();
+        await this.validate();
 
         let dir = this.path;
 
@@ -195,12 +195,12 @@ export class Stack {
         }
 
         // Write or overwrite the compose.yaml
-        fs.writeFileSync(path.join(dir, this._composeFileName), this.composeYAML);
+        await fsAsync.writeFile(path.join(dir, this._composeFileName), await this.readComposeYAML());
         if (process.env.PUID && process.env.PGID) {
             const uid = Number(process.env.PUID);
             const gid = Number(process.env.PGID);
-            fs.lchownSync(dir, uid, gid);
-            fs.chownSync(path.join(dir, this._composeFileName), uid, gid);
+            await fsAsync.lchown(dir, uid, gid);
+            await fsAsync.chown(path.join(dir, this._composeFileName), uid, gid);
         }
     }
 
@@ -273,16 +273,16 @@ export class Stack {
             // Scan the stacks directory, and get the stack list
             let filenameList = await fsAsync.readdir(stacksDir);
 
-            for (let filename of filenameList) {
+            await Promise.all(filenameList.map(async (filename) => {
                 try {
                     // Check if it is a directory
                     let stat = await fsAsync.stat(path.join(stacksDir, filename));
                     if (!stat.isDirectory()) {
-                        continue;
+                        return;
                     }
                     // If no compose file exists, skip it
                     if (!await Stack.composeFileExists(stacksDir, filename)) {
-                        continue;
+                        return;
                     }
                     let stack = await this.getStack(server, filename);
                     stack._status = CREATED_FILE;
@@ -292,7 +292,7 @@ export class Stack {
                         log.warn("getStackList", `Failed to get stack ${filename}, error: ${e.message}`);
                     }
                 }
-            }
+            }));
 
             // Cache by copying
             this.managedStackList = new Map(stackList);
