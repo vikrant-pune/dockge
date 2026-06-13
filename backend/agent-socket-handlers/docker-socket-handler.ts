@@ -3,6 +3,7 @@ import { DockgeServer } from "../dockge-server";
 import { callbackError, callbackResult, checkLogin, DockgeSocket, ValidationError } from "../util-server";
 import { Stack } from "../stack";
 import { AgentSocket } from "../../common/agent-socket";
+import { Antigravity } from "../antigravity";
 
 export class DockerSocketHandler extends AgentSocketHandler {
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
@@ -313,6 +314,46 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     ok: true,
                     msg: "Service " + serviceName + " restarted"
                 }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Antigravity module endpoints
+        agentSocket.on("antigravityApply", async (stackName: unknown, constraints: unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (typeof stackName !== "string") throw new ValidationError("Stack name must be a string");
+                const antigravity = new Antigravity(server);
+                await antigravity.applyConstraints(stackName, constraints as any);
+                callbackResult({ ok: true, msg: "Constraints applied" }, callback);
+                server.sendStackList();
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("antigravitySuspend", async (stackName: unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (typeof stackName !== "string") throw new ValidationError("Stack name must be a string");
+                const antigravity = new Antigravity(server);
+                await antigravity.suspendStack(socket, stackName);
+                callbackResult({ ok: true, msg: "Stack suspended" }, callback);
+                server.sendStackList();
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("antigravityIsolate", async (stackName: unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (typeof stackName !== "string") throw new ValidationError("Stack name must be a string");
+                const antigravity = new Antigravity(server);
+                await antigravity.isolateStack(socket, stackName);
+                callbackResult({ ok: true, msg: "Stack isolated" }, callback);
+                server.sendStackList();
             } catch (e) {
                 callbackError(e, callback);
             }
